@@ -7,7 +7,7 @@
 <style>
 body{margin:0;overflow:hidden;background:#020408;font-family:Arial,sans-serif;}
 canvas{display:block;}
-#panel{position:absolute;top:20px;left:20px;width:260px;padding:18px;background:rgba(10,15,25,.9);border-radius:14px;border:1px solid rgba(255,255,255,.08);color:white;backdrop-filter:blur(14px);z-index:10;}
+#panel{position:absolute;top:20px;left:20px;width:260px;padding:18px;background:rgba(10,15,25,.9);border-radius:14px;border:1px solid rgba(255,255,255,.08);color:white;backdrop-filter:blur(14px);z-index:10;display:none;}
 h1{margin:0;font-size:22px;}
 .subtitle{margin-top:4px;margin-bottom:12px;color:#38bdf8;font-size:11px;text-transform:uppercase;}
 input,select,button{width:100%;box-sizing:border-box;margin-top:10px;padding:10px;border:none;border-radius:8px;}
@@ -24,23 +24,21 @@ button{background:linear-gradient(135deg,#38bdf8,#0ea5e9);color:black;font-weigh
 <body>
 <div id="panel">
   <h1>Pipeline Grid</h1>
-  <div class="subtitle">Cube Fluid System</div>
-  <input id="taskInput" value="Draft Presentation"/>
-  <select id="teamSelect">
-    <option value="ASHLYNNE">Ashlynne</option>
-    <option value="CHARLES">Charles</option>
-    <option value="AUSTIN">Austin</option>
-  </select>
+  <div class="subtitle" id="panelSubtitle">Add Task</div>
+  <input id="taskInput" placeholder="Task name (max 20 chars)" maxlength="20"/>
+  <textarea id="taskDesc" placeholder="Description (optional)" style="width:100%;box-sizing:border-box;margin-top:10px;padding:10px;border:none;border-radius:8px;background:#111827;color:white;resize:vertical;min-height:72px;font-family:Arial,sans-serif;font-size:13px;"></textarea>
   <button id="addTaskBtn">Add Task</button>
-  <hr style="border-color:rgba(255,255,255,.1);margin-top:14px;"/>
-  <div class="subtitle" style="margin-top:10px;">View Mode</div>
-  <select id="viewSelect">
-    <option value="">— Select person —</option>
-    <option value="ASHLYNNE">Ashlynne</option>
-    <option value="CHARLES">Charles</option>
-    <option value="AUSTIN">Austin</option>
+</div>
+<div id="viewWidget" style="position:absolute;top:20px;left:20px;width:260px;padding:18px;background:rgba(10,15,25,.9);border-radius:14px;border:1px solid rgba(255,255,255,.08);color:white;backdrop-filter:blur(14px);z-index:10;">
+  <h1 style="margin:0;font-size:22px;">Pipeline Grid</h1>
+  <div class="subtitle">Cube Fluid System</div>
+  <select id="viewSelect" style="width:100%;box-sizing:border-box;margin-top:10px;padding:10px;border:none;border-radius:8px;background:#111827;color:white;">
+    <option value="">— View person —</option>
+    <option value="ALEX">Alex</option>
+    <option value="JORDAN">Jordan</option>
+    <option value="TAYLOR">Taylor</option>
   </select>
-  <button id="exitViewBtn" style="display:none;background:linear-gradient(135deg,#ef4444,#b91c1c);color:white;">Exit View Mode</button>
+  <button id="exitViewBtn" style="display:none;width:100%;box-sizing:border-box;margin-top:10px;padding:10px;border:none;border-radius:8px;background:linear-gradient(135deg,#ef4444,#b91c1c);color:white;font-weight:bold;cursor:pointer;">Exit View Mode</button>
 </div>
 <div id="viewHud" style="display:none;position:absolute;bottom:28px;left:50%;transform:translateX(-50%);background:rgba(10,15,25,.85);border:1px solid rgba(255,255,255,.12);border-radius:12px;padding:12px 24px;color:rgba(255,255,255,.7);font-size:13px;text-align:center;backdrop-filter:blur(10px);z-index:10;pointer-events:none;">
   <span id="viewNodeLabel" style="font-weight:bold;color:white;font-size:15px;"></span><br/>
@@ -51,10 +49,14 @@ button{background:linear-gradient(135deg,#38bdf8,#0ea5e9);color:black;font-weigh
   <h2 id="taskTitle">Task</h2>
   <p id="taskProgress">Progress: 0%</p>
   <p>Owner: <span id="taskOwner"></span></p>
+  <p id="taskDescDisplay" style="font-size:12px;color:rgba(255,255,255,.6);margin-top:4px;display:none;"></p>
   <button id="fillBtn" class="action complete" style="display:none;">Mark Complete</button>
   <button id="unfillBtn" class="action" style="display:none;background:linear-gradient(135deg,#f59e0b,#d97706);">Mark Incomplete</button>
   <button id="deleteBtn" class="action delete" style="display:none;">Delete</button>
 </div>
+<!-- Firebase -->
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.2/gsap.min.js"></script>
 <script>
@@ -79,10 +81,10 @@ light2.position.set(-20, 10, 10);
 scene.add(light2);
 
 const USERS = {
-  GLOBAL:  {color:0xffffff, liquid:0xffffff, name:"Global"},
-  ASHLYNNE:{color:0xff3b30, liquid:0xff2d55, name:"Ashlynne"},
-  CHARLES: {color:0x2979ff, liquid:0x448aff, name:"Charles"},
-  AUSTIN:  {color:0x34c759, liquid:0x30d158, name:"Austin"}
+  GLOBAL:{color:0xffffff, liquid:0xffffff, name:"Global"},
+  ALEX:  {color:0xff3b30, liquid:0xff2d55, name:"Alex"},
+  JORDAN:{color:0x2979ff, liquid:0x448aff, name:"Jordan"},
+  TAYLOR:{color:0x34c759, liquid:0x30d158, name:"Taylor"}
 };
 
 // Layout constants — flat XZ plane, Y is height of cubes
@@ -91,10 +93,10 @@ const HUB_Y    =   0;  // level 2 (hubs) world Y centre
 const TASK_Y   = -14;  // level 3 (tasks) shared rail world Y centre
 
 const HUB_SPACING = 10; // X gap between hubs
-const TASK_SPACING = 4; // X gap between tasks within a hub group
+const TASK_SPACING = 7; // Z gap between tasks — wide enough for 20-char labels
 
 // Hub X positions (centred around 0)
-const HUB_X = { ashlynne: -HUB_SPACING, charles: 0, austin: HUB_SPACING };
+const HUB_X = { alex: -HUB_SPACING, jordan: 0, taylor: HUB_SPACING };
 
 const nodes = {};
 const rayTargets = [];
@@ -337,10 +339,136 @@ function rebuildConnectors(hubId){
 }
 
 /* ── CREATE LEVEL 1: ROOT ── */
-createCubeNode({id:"root", owner:"GLOBAL", name:"Project Stage 1", size:3.0, height:4.5, progress:0, px:0, py:ROOT_Y, pz:0, isHub:true, level:1});
+/* ── FIREBASE REALTIME DATABASE ──
+  Paste your Firebase project config below.
+  Get it from: Firebase Console → Project Settings → Your apps → SDK setup → Config
+
+  Schema stored in Firebase:
+  /tasks/{taskId}: { owner, name, desc, progress, hubId, updatedBy, updatedAt }
+*/
+
+const FIREBASE_CONFIG = {
+  apiKey:            "AIzaSyAG6Nd4FyCZbzAh8Ou4b8po7YuKUwoZErY",
+  authDomain:        "pipeline-f360e.firebaseapp.com",
+  databaseURL:       "https://pipeline-f360e-default-rtdb.firebaseio.com",
+  projectId:         "pipeline-f360e",
+  storageBucket:     "pipeline-f360e.firebasestorage.app",
+  messagingSenderId: "200230319714",
+  appId:             "1:200230319714:web:bc105beecbdcde1093033b"
+};
+
+firebase.initializeApp(FIREBASE_CONFIG);
+const db = firebase.database();
+const tasksRef = db.ref("tasks");
+
+// Show a connection status badge
+const connBadge = document.createElement("div");
+connBadge.style = "position:absolute;bottom:20px;right:20px;padding:6px 14px;border-radius:20px;font-size:11px;font-weight:bold;z-index:20;backdrop-filter:blur(8px);border:1px solid rgba(255,255,255,.1);transition:.4s;";
+connBadge.innerText = "Connecting…";
+connBadge.style.background = "rgba(100,100,100,.7)";
+connBadge.style.color = "white";
+document.body.appendChild(connBadge);
+
+let connectedOnce = false;
+db.ref(".info/connected").on("value", snap=>{
+  if(snap.val()){
+    connectedOnce = true;
+    connBadge.innerText = "● Live";
+    connBadge.style.background = "rgba(16,185,129,.8)";
+  } else {
+    // Only show offline after we've connected at least once
+    if(connectedOnce){
+      connBadge.innerText = "○ Offline";
+      connBadge.style.background = "rgba(239,68,68,.7)";
+    }
+  }
+});
+
+// Track which task IDs we've already rendered to avoid duplicates
+const renderedTasks = new Set();
+
+function applyRemoteTask(taskId, t){
+  const hubId = t.hubId;
+  const hub   = nodes[hubId];
+  if(!hub) return;
+
+  if(!renderedTasks.has(taskId)){
+    // New task — create it
+    renderedTasks.add(taskId);
+    createCubeNode({
+      id:taskId, owner:t.owner, name:(t.name||"Task").slice(0,20),
+      desc:t.desc||"", size:1.4, height:2.2, progress:t.progress||0,
+      px:hub.userData.px, py:TASK_Y, pz:0, isHub:false, level:3
+    });
+    childrenOf[hubId].push(taskId);
+    parentOf[taskId] = hubId;
+    repositionTasks(hubId);
+  } else {
+    // Existing task — update progress + desc
+    const node = nodes[taskId];
+    if(!node) return;
+    node.userData.progress = t.progress||0;
+    node.userData.desc     = t.desc||"";
+    updateFluid(node);
+  }
+  propagateUp(hubId);
+
+  // If this task is currently open in sidebar, refresh it
+  if(selected && selected.userData.id === taskId) openSidebarForNode(nodes[taskId]);
+  if(viewMode && viewCursor && viewCursor.level===3){
+    const tid = childrenOf[viewCursor.hubId][viewCursor.taskIdx];
+    if(tid===taskId) focusViewCursor();
+  }
+}
+
+function removeRemoteTask(taskId){
+  if(!renderedTasks.has(taskId)) return;
+  renderedTasks.delete(taskId);
+  const node = nodes[taskId];
+  if(!node) return;
+  const hubId = parentOf[taskId];
+  if(hubId) childrenOf[hubId] = childrenOf[hubId].filter(c=>c!==taskId);
+  for(let i=connectors.length-1;i>=0;i--){
+    if(connectors[i].userData.taskId===taskId){ scene.remove(connectors[i]); connectors.splice(i,1); }
+  }
+  const idx = rayTargets.indexOf(node.userData.shell);
+  if(idx>-1) rayTargets.splice(idx,1);
+  scene.remove(node);
+  delete nodes[taskId];
+  delete childrenOf[taskId];
+  delete parentOf[taskId];
+  if(hubId){ repositionTasks(hubId); propagateUp(hubId); }
+  if(selected && selected.userData.id===taskId){
+    selected=null; document.getElementById("sidebar").classList.remove("open");
+  }
+}
+
+// Listen for real-time changes from Firebase
+tasksRef.on("child_added",   snap=>{ applyRemoteTask(snap.key, snap.val()); });
+tasksRef.on("child_changed", snap=>{ applyRemoteTask(snap.key, snap.val()); });
+tasksRef.on("child_removed", snap=>{ removeRemoteTask(snap.key); });
+
+function fbAddTask(taskId, hubId, owner, name, desc){
+  tasksRef.child(taskId).set({
+    hubId, owner, name, desc, progress:0,
+    updatedBy:"anonymous", updatedAt: Date.now()
+  });
+}
+
+function fbUpdateProgress(taskId, progress){
+  tasksRef.child(taskId).update({
+    progress, updatedBy:"anonymous", updatedAt: Date.now()
+  });
+}
+
+function fbDeleteTask(taskId){
+  tasksRef.child(taskId).remove();
+}
+
+createCubeNode({id:"root", owner:"GLOBAL", name:"Master Project", size:3.0, height:4.5, progress:0, px:0, py:ROOT_Y, pz:0, isHub:true, level:1});
 
 /* ── CREATE LEVEL 2: HUBS ── */
-["ashlynne","charles","austin"].forEach(id=>{
+["alex","jordan","taylor"].forEach(id=>{
   const owner = id.toUpperCase();
   const name = id.charAt(0).toUpperCase()+id.slice(1)+" Hub";
   createCubeNode({id, owner, name, size:2.0, height:3.2, progress:0, px:HUB_X[id], py:HUB_Y, pz:0, isHub:true, level:2});
@@ -349,30 +477,28 @@ createCubeNode({id:"root", owner:"GLOBAL", name:"Project Stage 1", size:3.0, hei
 });
 
 // Connect hubs to root with L-paths
-["ashlynne","charles","austin"].forEach(id=>{
+["alex","jordan","taylor"].forEach(id=>{
   connectHubToRoot(nodes[id], nodes.root);
 });
 
-propagateUp("ashlynne");
+propagateUp("alex");
 
 /* ── ADD TASK ── */
 function addTask(){
-  const owner  = document.getElementById("teamSelect").value;
-  const title  = document.getElementById("taskInput").value.trim()||"Task";
-  const hubId  = owner==="ASHLYNNE"?"ashlynne":owner==="CHARLES"?"charles":"austin";
-  const taskId = "task_"+Date.now();
+  if(!viewMode || !viewCursor || viewCursor.level !== 2) return;
 
-  // placeholder position — will be set by repositionTasks
-  const hub = nodes[hubId];
-  createCubeNode({
-    id:taskId, owner, name:title, size:1.4, height:2.2, progress:0,
-    px:hub.userData.px, py:TASK_Y, pz:0, isHub:false, level:3
-  });
-  childrenOf[hubId].push(taskId);
-  parentOf[taskId] = hubId;
+  const hubId  = viewCursor.hubId;
+  const hub    = nodes[hubId];
+  const owner  = hub.userData.owner;
+  const title  = document.getElementById("taskInput").value.trim().slice(0,20)||"Task";
+  const desc   = document.getElementById("taskDesc").value.trim();
+  const taskId = "task_"+Date.now()+"_"+Math.random().toString(36).slice(2,6);
 
-  repositionTasks(hubId);
-  propagateUp(taskId);
+  // Write to Firebase — the child_added listener will create the node locally
+  fbAddTask(taskId, hubId, owner, title, desc);
+
+  document.getElementById("taskInput").value = "";
+  document.getElementById("taskDesc").value = "";
 }
 
 document.getElementById("addTaskBtn").onclick = addTask;
@@ -388,10 +514,14 @@ window.addEventListener("mousemove", e=>{
 function openSidebarForNode(node){
   selected = node;
   const isLeaf = node.userData.level === 3;
+  const desc = node.userData.desc||"";
   document.getElementById("sidebar").classList.add("open");
   document.getElementById("taskTitle").innerText    = node.userData.name;
   document.getElementById("taskOwner").innerText    = USERS[node.userData.owner].name;
   document.getElementById("taskProgress").innerText = "Progress: "+Math.round(node.userData.progress*100)+"%";
+  const descEl = document.getElementById("taskDescDisplay");
+  if(desc){ descEl.innerText = desc; descEl.style.display="block"; }
+  else { descEl.innerText=""; descEl.style.display="none"; }
   document.getElementById("deleteBtn").style.display  = isLeaf?"block":"none";
   document.getElementById("fillBtn").style.display    = isLeaf?"block":"none";
   document.getElementById("unfillBtn").style.display  = isLeaf?"block":"none";
@@ -411,39 +541,17 @@ document.getElementById("closeBtn").onclick = ()=>document.getElementById("sideb
 
 document.getElementById("fillBtn").onclick = ()=>{
   if(!selected) return;
-  selected.userData.progress = 1;
-  updateFluid(selected);
-  document.getElementById("taskProgress").innerText = "Progress: 100%";
-  propagateUp(selected.userData.id);
-  if(viewMode) focusViewCursor();
+  fbUpdateProgress(selected.userData.id, 1);
 };
 
 document.getElementById("unfillBtn").onclick = ()=>{
   if(!selected) return;
-  selected.userData.progress = 0;
-  updateFluid(selected);
-  document.getElementById("taskProgress").innerText = "Progress: 0%";
-  propagateUp(selected.userData.id);
-  if(viewMode) focusViewCursor();
+  fbUpdateProgress(selected.userData.id, 0);
 };
 
 document.getElementById("deleteBtn").onclick = ()=>{
   if(!selected) return;
-  const id  = selected.userData.id;
-  const pid = parentOf[id];
-  if(pid) childrenOf[pid] = childrenOf[pid].filter(c=>c!==id);
-  // remove connectors tagged with this task
-  for(let i=connectors.length-1;i>=0;i--){
-    const dg = connectors[i];
-    if(dg.userData.taskId===id){ scene.remove(dg); connectors.splice(i,1); }
-  }
-  const idx = rayTargets.indexOf(selected.userData.shell);
-  if(idx>-1) rayTargets.splice(idx,1);
-  scene.remove(selected);
-  delete nodes[id]; delete childrenOf[id]; delete parentOf[id];
-  if(pid){ repositionTasks(pid); propagateUp(pid); }
-  selected = null;
-  document.getElementById("sidebar").classList.remove("open");
+  fbDeleteTask(selected.userData.id);
 };
 
 /* ── VIEW MODE ── */
@@ -453,7 +561,7 @@ let viewCursor = null; // {level: 1|2|3, hubId, taskIdx}
 
 function getViewNodes(owner){
   // returns {root, hub, tasks:[]}
-  const hubId = owner==="ASHLYNNE"?"ashlynne":owner==="CHARLES"?"charles":"austin";
+  const hubId = owner==="ALEX"?"alex":owner==="JORDAN"?"jordan":"taylor";
   return {
     root: nodes["root"],
     hub:  nodes[hubId],
@@ -509,6 +617,7 @@ function enterViewMode(owner){
   document.getElementById("exitViewBtn").style.display = "block";
   document.getElementById("viewHud").style.display = "block";
   document.getElementById("sidebar").classList.remove("open");
+  document.getElementById("viewWidget").style.display = "none";
   focusViewCursor();
 }
 
@@ -521,8 +630,9 @@ function exitViewMode(){
   document.getElementById("exitViewBtn").style.display = "none";
   document.getElementById("viewHud").style.display = "none";
   document.getElementById("viewSelect").value = "";
-  document.getElementById("panel").style.display = "block";
+  document.getElementById("panel").style.display = "none";
   document.getElementById("sidebar").classList.remove("open");
+  document.getElementById("viewWidget").style.display = "block";
 }
 
 function focusViewCursor(){
@@ -552,16 +662,28 @@ function focusViewCursor(){
   const tx = targetNode.position.x;
   const ty = targetNode.position.y;
   const tz = targetNode.position.z;
-  const dist = level===1?18:level===2?12:9;
+  const dist = level===1?18:level===2?14:22;
   gsap.to(viewCamTarget, {x:tx, y:ty, z:tz, duration:.6, ease:"power2.out"});
   gsap.to(viewCamDist,   {v:dist,           duration:.6, ease:"power2.out"});
 
+  if(level === 3){
+    // Lock camera: fixed X (hub's X), slide along Z tracking the task, look straight at it
+    const camX = tx + 22; // perpendicular to Z rail, offset along X
+    const camZ = tz;      // stay at same Z as the task
+    const camY = ty + 3;
+    gsap.to(level3Cam, {x:camX, y:camY, z:camZ, duration:.6, ease:"power2.out"});
+  } else {
+    const targetAngle = viewCamAngle;
+    gsap.to({a:viewCamAngle}, {a:targetAngle, duration:.6, ease:"power2.out", onUpdate: function(){ viewCamAngle = this.targets()[0].a; }});
+  }
+
   // panel / sidebar logic
   if(level === 2){
-    // show add-task panel pre-set to this owner, close sidebar
+    // show add-task panel for this branch only, close sidebar
     document.getElementById("sidebar").classList.remove("open");
     document.getElementById("panel").style.display = "block";
-    document.getElementById("teamSelect").value = targetNode.userData.owner;
+    document.getElementById("panelSubtitle").innerText =
+      "Add task to " + USERS[targetNode.userData.owner].name + "'s branch";
   } else if(level === 3){
     // show sidebar for this task, hide add panel
     document.getElementById("panel").style.display = "none";
@@ -576,6 +698,8 @@ function focusViewCursor(){
 const viewCamTarget = {x:0, y:2, z:0};
 const viewCamDist   = {v:42};
 let viewCamAngle = 0;
+// Fixed camera position for level 3 — locked facing along Z, slides with task
+const level3Cam = {x:0, y:0, z:0};
 
 window.addEventListener("keydown", e=>{
   if(!viewMode) return;
@@ -586,17 +710,16 @@ window.addEventListener("keydown", e=>{
 
   if(e.key === "ArrowRight"){
     if(level===3 && tasks.length){
-      viewCursor.taskIdx = (taskIdx+1) % tasks.length;
+      viewCursor.taskIdx = (taskIdx-1+tasks.length) % tasks.length;
       focusViewCursor();
     } else if(level===2){
-      // go down to first task
       if(tasks.length){ viewCursor.level=3; viewCursor.taskIdx=0; focusViewCursor(); }
     }
     e.preventDefault();
   }
   if(e.key === "ArrowLeft"){
     if(level===3 && tasks.length){
-      viewCursor.taskIdx = (taskIdx-1+tasks.length) % tasks.length;
+      viewCursor.taskIdx = (taskIdx+1) % tasks.length;
       focusViewCursor();
     } else if(level===2){
       if(tasks.length){ viewCursor.level=3; viewCursor.taskIdx=tasks.length-1; focusViewCursor(); }
@@ -629,13 +752,17 @@ function animate(){
   const t = clock.getElapsedTime();
 
   if(viewMode){
-    // slow orbit around the focused node
-    viewCamAngle += 0.008;
-    const dist = viewCamDist.v;
-    camera.position.x = viewCamTarget.x + Math.sin(viewCamAngle)*dist;
-    camera.position.z = viewCamTarget.z + Math.cos(viewCamAngle)*dist;
-    camera.position.y = viewCamTarget.y + dist*0.35;
-    camera.lookAt(viewCamTarget.x, viewCamTarget.y, viewCamTarget.z);
+    if(viewCursor && viewCursor.level === 3){
+      // Locked camera: slides along Z, faces the task directly
+      camera.position.set(level3Cam.x, level3Cam.y, level3Cam.z);
+      camera.lookAt(viewCamTarget.x, viewCamTarget.y, viewCamTarget.z);
+    } else {
+      // Angle-based orbit for levels 1 and 2
+      camera.position.x = viewCamTarget.x + Math.sin(viewCamAngle) * viewCamDist.v;
+      camera.position.z = viewCamTarget.z + Math.cos(viewCamAngle) * viewCamDist.v;
+      camera.position.y = viewCamTarget.y + viewCamDist.v * 0.35;
+      camera.lookAt(viewCamTarget.x, viewCamTarget.y, viewCamTarget.z);
+    }
   } else {
     // normal orbit
     const orbitR = 42;
@@ -645,7 +772,7 @@ function animate(){
     camera.lookAt(0, 2, 0);
   }
 
-  // subtle bob
+  // subtle bob + ring spin — always on
   Object.values(nodes).forEach((node,i)=>{
     node.position.y = node.userData.baseY + Math.sin(t*0.8+i)*0.04;
     node.userData.ring.rotation.y = t*.35;
