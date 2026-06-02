@@ -23,20 +23,20 @@ button{background:linear-gradient(135deg,#38bdf8,#0ea5e9);color:black;font-weigh
 </head>
 <body>
 <div id="panel">
-  <h1>Pipeline Grid</h1>
+  <h1>Project Tracker</h1>
   <div class="subtitle" id="panelSubtitle">Add Task</div>
   <input id="taskInput" placeholder="Task name (max 20 chars)" maxlength="20"/>
   <textarea id="taskDesc" placeholder="Description (optional)" style="width:100%;box-sizing:border-box;margin-top:10px;padding:10px;border:none;border-radius:8px;background:#111827;color:white;resize:vertical;min-height:72px;font-family:Arial,sans-serif;font-size:13px;"></textarea>
   <button id="addTaskBtn">Add Task</button>
 </div>
 <div id="viewWidget" style="position:absolute;top:20px;left:20px;width:260px;padding:18px;background:rgba(10,15,25,.9);border-radius:14px;border:1px solid rgba(255,255,255,.08);color:white;backdrop-filter:blur(14px);z-index:10;">
-  <h1 style="margin:0;font-size:22px;">Pipeline Grid</h1>
-  <div class="subtitle">Cube Fluid System</div>
+  <h1 style="margin:0;font-size:22px;">Project Tracker</h1>
+  <div class="subtitle"></div>
   <select id="viewSelect" style="width:100%;box-sizing:border-box;margin-top:10px;padding:10px;border:none;border-radius:8px;background:#111827;color:white;">
     <option value="">— View person —</option>
-    <option value="ALEX">Alex</option>
-    <option value="JORDAN">Jordan</option>
-    <option value="TAYLOR">Taylor</option>
+    <option value="ASHLYNNE">Ashlynne</option>
+    <option value="CHARLES">Charles</option>
+    <option value="AUSTIN">Austin</option>
   </select>
   <button id="exitViewBtn" style="display:none;width:100%;box-sizing:border-box;margin-top:10px;padding:10px;border:none;border-radius:8px;background:linear-gradient(135deg,#ef4444,#b91c1c);color:white;font-weight:bold;cursor:pointer;">Exit View Mode</button>
 </div>
@@ -82,9 +82,9 @@ scene.add(light2);
 
 const USERS = {
   GLOBAL:{color:0xffffff, liquid:0xffffff, name:"Global"},
-  ALEX:  {color:0xff3b30, liquid:0xff2d55, name:"Alex"},
-  JORDAN:{color:0x2979ff, liquid:0x448aff, name:"Jordan"},
-  TAYLOR:{color:0x34c759, liquid:0x30d158, name:"Taylor"}
+  ASHLYNNE:  {color:0xff3b30, liquid:0xff2d55, name:"Ashlynne"},
+  CHARLES:{color:0x2979ff, liquid:0x448aff, name:"Charles"},
+  AUSTIN:{color:0x34c759, liquid:0x30d158, name:"Austin"}
 };
 
 // Layout constants — flat XZ plane, Y is height of cubes
@@ -96,7 +96,7 @@ const HUB_SPACING = 10; // X gap between hubs
 const TASK_SPACING = 7; // Z gap between tasks — wide enough for 20-char labels
 
 // Hub X positions (centred around 0)
-const HUB_X = { alex: -HUB_SPACING, jordan: 0, taylor: HUB_SPACING };
+const HUB_X = { ashlynne: -HUB_SPACING, charles: 0, austin: HUB_SPACING };
 
 const nodes = {};
 const rayTargets = [];
@@ -465,10 +465,10 @@ function fbDeleteTask(taskId){
   tasksRef.child(taskId).remove();
 }
 
-createCubeNode({id:"root", owner:"GLOBAL", name:"Master Project", size:3.0, height:4.5, progress:0, px:0, py:ROOT_Y, pz:0, isHub:true, level:1});
+createCubeNode({id:"root", owner:"GLOBAL", name:"Project Stage 1", size:3.0, height:4.5, progress:0, px:0, py:ROOT_Y, pz:0, isHub:true, level:1});
 
 /* ── CREATE LEVEL 2: HUBS ── */
-["alex","jordan","taylor"].forEach(id=>{
+["ashlynne","charles","austin"].forEach(id=>{
   const owner = id.toUpperCase();
   const name = id.charAt(0).toUpperCase()+id.slice(1)+" Hub";
   createCubeNode({id, owner, name, size:2.0, height:3.2, progress:0, px:HUB_X[id], py:HUB_Y, pz:0, isHub:true, level:2});
@@ -477,11 +477,11 @@ createCubeNode({id:"root", owner:"GLOBAL", name:"Master Project", size:3.0, heig
 });
 
 // Connect hubs to root with L-paths
-["alex","jordan","taylor"].forEach(id=>{
+["ashlynne","charles","austin"].forEach(id=>{
   connectHubToRoot(nodes[id], nodes.root);
 });
 
-propagateUp("alex");
+propagateUp("ashlynne");
 
 /* ── ADD TASK ── */
 function addTask(){
@@ -561,7 +561,7 @@ let viewCursor = null; // {level: 1|2|3, hubId, taskIdx}
 
 function getViewNodes(owner){
   // returns {root, hub, tasks:[]}
-  const hubId = owner==="ALEX"?"alex":owner==="JORDAN"?"jordan":"taylor";
+  const hubId = owner==="ASHLYNNE"?"ashlynne":owner==="CHARLES"?"charles":"austin";
   return {
     root: nodes["root"],
     hub:  nodes[hubId],
