@@ -1,0 +1,665 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Pipeline Cube Grid</title>
+<style>
+body{margin:0;overflow:hidden;background:#020408;font-family:Arial,sans-serif;}
+canvas{display:block;}
+#panel{position:absolute;top:20px;left:20px;width:260px;padding:18px;background:rgba(10,15,25,.9);border-radius:14px;border:1px solid rgba(255,255,255,.08);color:white;backdrop-filter:blur(14px);z-index:10;}
+h1{margin:0;font-size:22px;}
+.subtitle{margin-top:4px;margin-bottom:12px;color:#38bdf8;font-size:11px;text-transform:uppercase;}
+input,select,button{width:100%;box-sizing:border-box;margin-top:10px;padding:10px;border:none;border-radius:8px;}
+input,select{background:#111827;color:white;}
+button{background:linear-gradient(135deg,#38bdf8,#0ea5e9);color:black;font-weight:bold;cursor:pointer;}
+#sidebar{position:absolute;top:20px;right:-320px;width:260px;padding:18px;background:rgba(10,15,25,.92);border-radius:14px;border:1px solid rgba(255,255,255,.08);color:white;transition:.4s;backdrop-filter:blur(14px);z-index:10;}
+#sidebar.open{right:20px;}
+#closeBtn{position:absolute;top:10px;right:10px;border:none;background:none;color:white;font-size:22px;cursor:pointer;width:auto;}
+.action{margin-top:10px;color:white;}
+.complete{background:linear-gradient(135deg,#10b981,#059669);}
+.delete{background:linear-gradient(135deg,#ef4444,#b91c1c);}
+</style>
+</head>
+<body>
+<div id="panel">
+  <h1>Pipeline Grid</h1>
+  <div class="subtitle">Cube Fluid System</div>
+  <input id="taskInput" value="Draft Presentation"/>
+  <select id="teamSelect">
+    <option value="ASHLYNNE">Ashlynne</option>
+    <option value="CHARLES">Charles</option>
+    <option value="AUSTIN">Austin</option>
+  </select>
+  <button id="addTaskBtn">Add Task</button>
+  <hr style="border-color:rgba(255,255,255,.1);margin-top:14px;"/>
+  <div class="subtitle" style="margin-top:10px;">View Mode</div>
+  <select id="viewSelect">
+    <option value="">— Select person —</option>
+    <option value="ASHLYNNE">Ashlynne</option>
+    <option value="CHARLES">Charles</option>
+    <option value="AUSTIN">Austin</option>
+  </select>
+  <button id="exitViewBtn" style="display:none;background:linear-gradient(135deg,#ef4444,#b91c1c);color:white;">Exit View Mode</button>
+</div>
+<div id="viewHud" style="display:none;position:absolute;bottom:28px;left:50%;transform:translateX(-50%);background:rgba(10,15,25,.85);border:1px solid rgba(255,255,255,.12);border-radius:12px;padding:12px 24px;color:rgba(255,255,255,.7);font-size:13px;text-align:center;backdrop-filter:blur(10px);z-index:10;pointer-events:none;">
+  <span id="viewNodeLabel" style="font-weight:bold;color:white;font-size:15px;"></span><br/>
+  <span style="font-size:11px;opacity:.6;">&#8592; &#8594; navigate tasks &nbsp;|&nbsp; &#8593; go up &nbsp;|&nbsp; ESC exit</span>
+</div>
+<div id="sidebar">
+  <button id="closeBtn">×</button>
+  <h2 id="taskTitle">Task</h2>
+  <p id="taskProgress">Progress: 0%</p>
+  <p>Owner: <span id="taskOwner"></span></p>
+  <button id="fillBtn" class="action complete" style="display:none;">Mark Complete</button>
+  <button id="unfillBtn" class="action" style="display:none;background:linear-gradient(135deg,#f59e0b,#d97706);">Mark Incomplete</button>
+  <button id="deleteBtn" class="action delete" style="display:none;">Delete</button>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.2/gsap.min.js"></script>
+<script>
+const scene = new THREE.Scene();
+scene.fog = new THREE.FogExp2(0x020408, 0.012);
+
+const camera = new THREE.PerspectiveCamera(55, window.innerWidth/window.innerHeight, 0.1, 500);
+camera.position.set(0, 18, 38);
+
+const renderer = new THREE.WebGLRenderer({antialias:true});
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.setPixelRatio(Math.min(window.devicePixelRatio,2));
+renderer.outputEncoding = THREE.sRGBEncoding;
+document.body.appendChild(renderer.domElement);
+
+scene.add(new THREE.AmbientLight(0x8899bb, 3.5));
+const light = new THREE.PointLight(0xffffff, 5.0, 300);
+light.position.set(0, 40, 20);
+scene.add(light);
+const light2 = new THREE.PointLight(0x4488ff, 2.5, 200);
+light2.position.set(-20, 10, 10);
+scene.add(light2);
+
+const USERS = {
+  GLOBAL:  {color:0xffffff, liquid:0xffffff, name:"Global"},
+  ASHLYNNE:{color:0xff3b30, liquid:0xff2d55, name:"Ashlynne"},
+  CHARLES: {color:0x2979ff, liquid:0x448aff, name:"Charles"},
+  AUSTIN:  {color:0x34c759, liquid:0x30d158, name:"Austin"}
+};
+
+// Layout constants — flat XZ plane, Y is height of cubes
+const ROOT_Y   =  14;  // level 1 (root) world Y centre
+const HUB_Y    =   0;  // level 2 (hubs) world Y centre
+const TASK_Y   = -14;  // level 3 (tasks) shared rail world Y centre
+
+const HUB_SPACING = 10; // X gap between hubs
+const TASK_SPACING = 4; // X gap between tasks within a hub group
+
+// Hub X positions (centred around 0)
+const HUB_X = { ashlynne: -HUB_SPACING, charles: 0, austin: HUB_SPACING };
+
+const nodes = {};
+const rayTargets = [];
+const connectors = []; // each: {line, points:[{x,y,z}, ...], dashObjs, phase, color}
+const childrenOf = {};
+const parentOf   = {};
+let selected = null;
+
+/* ── cube node ── */
+function createCubeNode(data){
+  const meta = USERS[data.owner];
+  const group = new THREE.Group();
+  group.position.set(data.px, data.py, data.pz || 0);
+
+  const W = data.size, H = data.height, D = data.size;
+
+  const shell = new THREE.Mesh(
+    new THREE.BoxGeometry(W, H, D),
+    new THREE.MeshStandardMaterial({color:meta.color, transparent:true, opacity:.10, roughness:.05, metalness:.9, side:THREE.DoubleSide})
+  );
+  group.add(shell);
+
+  const edges = new THREE.LineSegments(
+    new THREE.EdgesGeometry(new THREE.BoxGeometry(W, H, D)),
+    new THREE.LineBasicMaterial({color:meta.liquid, transparent:true, opacity:.55})
+  );
+  group.add(edges);
+
+  const fluid = new THREE.Mesh(
+    new THREE.BoxGeometry(W*.84, H, D*.84),
+    new THREE.MeshStandardMaterial({color:meta.liquid, emissive:meta.liquid, emissiveIntensity:2.8, transparent:true, opacity:.92, roughness:.2, metalness:0})
+  );
+  group.add(fluid);
+
+  const cap = new THREE.Mesh(
+    new THREE.PlaneGeometry(W*.84, D*.84),
+    new THREE.MeshBasicMaterial({color:meta.liquid, side:THREE.DoubleSide})
+  );
+  cap.rotation.x = -Math.PI/2;
+  group.add(cap);
+
+  const ring = new THREE.LineSegments(
+    new THREE.EdgesGeometry(new THREE.BoxGeometry(W*1.18, 0.01, D*1.18)),
+    new THREE.LineBasicMaterial({color:meta.liquid, transparent:true, opacity:.28})
+  );
+  ring.position.y = -H/2 - .02;
+  group.add(ring);
+
+  // canvas label
+  const cv = document.createElement("canvas");
+  cv.width = 512; cv.height = 128;
+  const ctx = cv.getContext("2d");
+  ctx.clearRect(0,0,512,128);
+  const hex = "#"+meta.liquid.toString(16).padStart(6,"0");
+  ctx.font = "bold 50px Arial";
+  ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  ctx.fillStyle = hex; ctx.shadowColor = hex; ctx.shadowBlur = 18;
+  ctx.fillText(data.name, 256, 64);
+  const tex = new THREE.CanvasTexture(cv);
+  const sprite = new THREE.Sprite(new THREE.SpriteMaterial({map:tex, transparent:true, depthWrite:false}));
+  const sw = Math.max(data.size*1.8, 3.5);
+  sprite.scale.set(sw*(512/128)/3.2*2, sw/3.2*1.1, 1);
+  sprite.position.y = H/2 + 0.9;
+  group.add(sprite);
+
+  group.userData = {...data, shell, fluid, cap, ring, sprite, baseY: data.py, baseZ: data.pz||0};
+  shell.userData.group = group;
+  nodes[data.id] = group;
+  childrenOf[data.id] = [];
+  rayTargets.push(shell);
+  scene.add(group);
+  updateFluid(group, true);
+  return group;
+}
+
+function updateFluid(group, instant=false){
+  const {fluid, cap, height, progress} = group.userData;
+  const H = height, fill = Math.max(progress, .001);
+  const fluidY = (-H/2)+(fill*H/2), capY = (-H/2)+(fill*H);
+  if(instant){ fluid.scale.y=fill; fluid.position.y=fluidY; cap.position.y=capY; return; }
+  gsap.to(fluid.scale,    {y:fill,   duration:.7, ease:"power2.out"});
+  gsap.to(fluid.position, {y:fluidY, duration:.7, ease:"power2.out"});
+  gsap.to(cap.position,   {y:capY,   duration:.7, ease:"power2.out"});
+}
+
+function propagateUp(id){
+  const children = childrenOf[id];
+  if(children && children.length > 0){
+    const avg = children.reduce((s,cid)=>s+nodes[cid].userData.progress,0)/children.length;
+    nodes[id].userData.progress = avg;
+    updateFluid(nodes[id]);
+  }
+  const pid = parentOf[id];
+  if(pid) propagateUp(pid);
+}
+
+/* ── L-shaped dashed connector ──
+   path: array of {x,y,z} waypoints (2 or 3 points → 1 or 2 segments)
+   dashes flow along the total arc length */
+function connectL(waypoints, color){
+  const N = 22;
+  const dashGroup = new THREE.Group();
+  const dashObjs = [];
+  for(let i=0;i<N;i++){
+    const d = new THREE.Mesh(
+      new THREE.BoxGeometry(.14,.14,.14),
+      new THREE.MeshBasicMaterial({color, transparent:true, opacity:.75})
+    );
+    dashGroup.add(d);
+    dashObjs.push(d);
+  }
+  // pre-compute segment lengths and cumulative fractions
+  const segs = [];
+  let total = 0;
+  for(let i=0;i<waypoints.length-1;i++){
+    const a=waypoints[i], b=waypoints[i+1];
+    const len = Math.sqrt((b.x-a.x)**2+(b.y-a.y)**2+(b.z-a.z)**2);
+    segs.push({a,b,len});
+    total += len;
+  }
+  segs.forEach(s=>{ s.frac = s.len/total; });
+
+  dashGroup.userData = {dashObjs, segs, total, phase:Math.random()*10, color,
+    nodeA:null, nodeB:null /* for live position update if needed */};
+  connectors.push(dashGroup);
+  scene.add(dashGroup);
+  return dashGroup;
+}
+
+function samplePath(segs, u){
+  // u in [0,1] along path
+  let rem = u;
+  for(const s of segs){
+    if(rem <= s.frac || s === segs[segs.length-1]){
+      const t = Math.min(rem/s.frac, 1);
+      return {
+        x: s.a.x+(s.b.x-s.a.x)*t,
+        y: s.a.y+(s.b.y-s.a.y)*t,
+        z: s.a.z+(s.b.z-s.a.z)*t
+      };
+    }
+    rem -= s.frac;
+  }
+}
+
+function updateConnectors(t){
+  connectors.forEach(dg=>{
+    if(dg.userData.dead) return;
+    const {dashObjs, segs, phase} = dg.userData;
+    const N = dashObjs.length;
+    for(let i=0;i<N;i++){
+      const u = ((i/N)+(t*.15+phase))%1;
+      const p = samplePath(segs, u);
+      dashObjs[i].position.set(p.x, p.y, p.z);
+      const fade = u<.05?u/.05:u>.95?(1-u)/.05:1;
+      dashObjs[i].material.opacity = .7*fade;
+    }
+  });
+}
+
+/* ── helper: world pos of cube top/bottom centre ── */
+function topOf(node)  { return {x:node.position.x, y:node.position.y+node.userData.height/2, z:node.position.z}; }
+function botOf(node)  { return {x:node.position.x, y:node.position.y-node.userData.height/2, z:node.position.z}; }
+
+/* ── build L-path: horizontal from parent bottom, then vertical down to child top ── */
+function connectHubToRoot(hub, root){
+  const rBot = botOf(root);
+  const hTop = topOf(hub);
+  // go horizontal at root-bottom Y, then drop
+  connectL([
+    {x:rBot.x, y:rBot.y, z:0},
+    {x:hTop.x, y:rBot.y, z:0},
+    {x:hTop.x, y:hTop.y, z:0}
+  ], USERS[hub.userData.owner].liquid);
+}
+
+function connectTaskToHub(task, hub){
+  const hBot = botOf(hub);
+  const tTop = topOf(task);
+  // horizontal at hub-bottom Y, then drop to task top
+  connectL([
+    {x:hBot.x, y:hBot.y, z:0},
+    {x:tTop.x, y:hBot.y, z:0},
+    {x:tTop.x, y:tTop.y, z:0}
+  ], USERS[task.userData.owner].liquid);
+}
+
+/* ── task position calculator ── */
+// Tasks for a hub are spread evenly on the TASK_Y rail, centred on hub X
+function getTaskPositions(hubId){
+  const tasks = childrenOf[hubId];
+  const hubX = HUB_X[hubId];
+  const n = tasks.length;
+  const positions = [];
+  for(let i=0;i<n;i++){
+    const z = (i - (n-1)/2) * TASK_SPACING;
+    positions.push({px:hubX, pz:z, py:TASK_Y});
+  }
+  return positions;
+}
+
+function repositionTasks(hubId){
+  const tasks = childrenOf[hubId];
+  const positions = getTaskPositions(hubId);
+  tasks.forEach((tid,i)=>{
+    const node = nodes[tid];
+    const {px,py,pz} = positions[i];
+    node.userData.px = px;
+    node.userData.py = py;
+    node.userData.pz = pz;
+    node.userData.baseY = py;
+    node.userData.baseZ = pz;
+    gsap.to(node.position, {x:px, y:py, z:pz, duration:.5, ease:"power2.out"});
+  });
+  rebuildConnectors(hubId);
+}
+
+function rebuildConnectors(hubId){
+  for(let i=connectors.length-1;i>=0;i--){
+    const dg = connectors[i];
+    if(dg.userData.hubId === hubId){
+      scene.remove(dg);
+      connectors.splice(i,1);
+    }
+  }
+  const hub = nodes[hubId];
+  childrenOf[hubId].forEach(tid=>{
+    const task = nodes[tid];
+    const hBot = botOf(hub);
+    const tTop = topOf(task);
+    // L-shape: drop vertically from hub bottom, then travel along Z to task
+    const dg = connectL([
+      {x:hBot.x, y:hBot.y, z:hBot.z},
+      {x:hBot.x, y:tTop.y, z:hBot.z},
+      {x:tTop.x, y:tTop.y, z:tTop.z}
+    ], USERS[task.userData.owner].liquid);
+    dg.userData.hubId = hubId;
+    dg.userData.taskId = tid;
+  });
+}
+
+/* ── CREATE LEVEL 1: ROOT ── */
+createCubeNode({id:"root", owner:"GLOBAL", name:"Project Stage 1", size:3.0, height:4.5, progress:0, px:0, py:ROOT_Y, pz:0, isHub:true, level:1});
+
+/* ── CREATE LEVEL 2: HUBS ── */
+["ashlynne","charles","austin"].forEach(id=>{
+  const owner = id.toUpperCase();
+  const name = id.charAt(0).toUpperCase()+id.slice(1)+" Hub";
+  createCubeNode({id, owner, name, size:2.0, height:3.2, progress:0, px:HUB_X[id], py:HUB_Y, pz:0, isHub:true, level:2});
+  childrenOf["root"].push(id);
+  parentOf[id] = "root";
+});
+
+// Connect hubs to root with L-paths
+["ashlynne","charles","austin"].forEach(id=>{
+  connectHubToRoot(nodes[id], nodes.root);
+});
+
+propagateUp("ashlynne");
+
+/* ── ADD TASK ── */
+function addTask(){
+  const owner  = document.getElementById("teamSelect").value;
+  const title  = document.getElementById("taskInput").value.trim()||"Task";
+  const hubId  = owner==="ASHLYNNE"?"ashlynne":owner==="CHARLES"?"charles":"austin";
+  const taskId = "task_"+Date.now();
+
+  // placeholder position — will be set by repositionTasks
+  const hub = nodes[hubId];
+  createCubeNode({
+    id:taskId, owner, name:title, size:1.4, height:2.2, progress:0,
+    px:hub.userData.px, py:TASK_Y, pz:0, isHub:false, level:3
+  });
+  childrenOf[hubId].push(taskId);
+  parentOf[taskId] = hubId;
+
+  repositionTasks(hubId);
+  propagateUp(taskId);
+}
+
+document.getElementById("addTaskBtn").onclick = addTask;
+
+/* ── RAYCASTING ── */
+const raycaster = new THREE.Raycaster();
+const mouse = new THREE.Vector2();
+window.addEventListener("mousemove", e=>{
+  mouse.x = (e.clientX/window.innerWidth)*2-1;
+  mouse.y = -(e.clientY/window.innerHeight)*2+1;
+});
+
+function openSidebarForNode(node){
+  selected = node;
+  const isLeaf = node.userData.level === 3;
+  document.getElementById("sidebar").classList.add("open");
+  document.getElementById("taskTitle").innerText    = node.userData.name;
+  document.getElementById("taskOwner").innerText    = USERS[node.userData.owner].name;
+  document.getElementById("taskProgress").innerText = "Progress: "+Math.round(node.userData.progress*100)+"%";
+  document.getElementById("deleteBtn").style.display  = isLeaf?"block":"none";
+  document.getElementById("fillBtn").style.display    = isLeaf?"block":"none";
+  document.getElementById("unfillBtn").style.display  = isLeaf?"block":"none";
+}
+
+renderer.domElement.addEventListener("click", ()=>{
+  if(viewMode) return;
+  raycaster.setFromCamera(mouse, camera);
+  const hits = raycaster.intersectObjects(rayTargets);
+  if(!hits.length) return;
+  const group = hits[0].object.userData.group;
+  openSidebarForNode(group);
+  gsap.to(group.scale,{x:1.1,y:1.1,z:1.1,duration:.12,yoyo:true,repeat:1});
+});
+
+document.getElementById("closeBtn").onclick = ()=>document.getElementById("sidebar").classList.remove("open");
+
+document.getElementById("fillBtn").onclick = ()=>{
+  if(!selected) return;
+  selected.userData.progress = 1;
+  updateFluid(selected);
+  document.getElementById("taskProgress").innerText = "Progress: 100%";
+  propagateUp(selected.userData.id);
+  if(viewMode) focusViewCursor();
+};
+
+document.getElementById("unfillBtn").onclick = ()=>{
+  if(!selected) return;
+  selected.userData.progress = 0;
+  updateFluid(selected);
+  document.getElementById("taskProgress").innerText = "Progress: 0%";
+  propagateUp(selected.userData.id);
+  if(viewMode) focusViewCursor();
+};
+
+document.getElementById("deleteBtn").onclick = ()=>{
+  if(!selected) return;
+  const id  = selected.userData.id;
+  const pid = parentOf[id];
+  if(pid) childrenOf[pid] = childrenOf[pid].filter(c=>c!==id);
+  // remove connectors tagged with this task
+  for(let i=connectors.length-1;i>=0;i--){
+    const dg = connectors[i];
+    if(dg.userData.taskId===id){ scene.remove(dg); connectors.splice(i,1); }
+  }
+  const idx = rayTargets.indexOf(selected.userData.shell);
+  if(idx>-1) rayTargets.splice(idx,1);
+  scene.remove(selected);
+  delete nodes[id]; delete childrenOf[id]; delete parentOf[id];
+  if(pid){ repositionTasks(pid); propagateUp(pid); }
+  selected = null;
+  document.getElementById("sidebar").classList.remove("open");
+};
+
+/* ── VIEW MODE ── */
+let viewMode = false;
+let viewOwner = null;
+let viewCursor = null; // {level: 1|2|3, hubId, taskIdx}
+
+function getViewNodes(owner){
+  // returns {root, hub, tasks:[]}
+  const hubId = owner==="ASHLYNNE"?"ashlynne":owner==="CHARLES"?"charles":"austin";
+  return {
+    root: nodes["root"],
+    hub:  nodes[hubId],
+    hubId,
+    tasks: childrenOf[hubId].map(tid=>nodes[tid])
+  };
+}
+
+function enterViewMode(owner){
+  viewMode = true;
+  viewOwner = owner;
+  const {hubId, tasks} = getViewNodes(owner);
+  // start cursor at hub level
+  viewCursor = {level:2, hubId, taskIdx:0};
+
+  // hide unrelated nodes and connectors
+  Object.values(nodes).forEach(n=>{
+    const o = n.userData.owner;
+    const id = n.userData.id;
+    const isRoot = id === "root";
+    const isThisHub = id === hubId;
+    const isThisTask = parentOf[id] === hubId;
+    n.visible = isRoot || isThisHub || isThisTask;
+  });
+  connectors.forEach(dg=>{
+    // show hub->root connectors for this hub, and task connectors for this hub
+    const isHubConnector = !dg.userData.hubId; // root-level connectors
+    const isThisHubConnector = dg.userData.hubId === hubId;
+    // only show connectors that belong to this hub's tasks, or root->this hub
+    dg.visible = isThisHubConnector;
+    // also show the root->hub connector — identify by checking waypoints
+    // simpler: show all non-task connectors only if they connect to our hub
+    if(!dg.userData.hubId){
+      // root-to-hub connector: check if any dashObj is near hub X
+      dg.visible = false; // hide root connectors to other hubs
+    }
+  });
+  // find root->this hub connector and show it
+  connectors.forEach(dg=>{
+    if(!dg.userData.hubId && !dg.userData.taskId){
+      // these are root-to-hub; identify by hub X proximity
+      const hubNode = nodes[hubId];
+      const seg = dg.userData.segs;
+      if(seg && seg.length > 0){
+        const lastSeg = seg[seg.length-1];
+        if(Math.abs(lastSeg.b.x - hubNode.userData.px) < 0.5){
+          dg.visible = true;
+        }
+      }
+    }
+  });
+
+  document.getElementById("exitViewBtn").style.display = "block";
+  document.getElementById("viewHud").style.display = "block";
+  document.getElementById("sidebar").classList.remove("open");
+  focusViewCursor();
+}
+
+function exitViewMode(){
+  viewMode = false;
+  viewOwner = null;
+  viewCursor = null;
+  Object.values(nodes).forEach(n=>{ n.visible = true; });
+  connectors.forEach(dg=>{ dg.visible = true; });
+  document.getElementById("exitViewBtn").style.display = "none";
+  document.getElementById("viewHud").style.display = "none";
+  document.getElementById("viewSelect").value = "";
+  document.getElementById("panel").style.display = "block";
+  document.getElementById("sidebar").classList.remove("open");
+}
+
+function focusViewCursor(){
+  if(!viewCursor) return;
+  const {level, hubId, taskIdx} = viewCursor;
+  let targetNode;
+  if(level === 1) targetNode = nodes["root"];
+  else if(level === 2) targetNode = nodes[hubId];
+  else {
+    const tasks = childrenOf[hubId];
+    if(!tasks.length){ viewCursor.level=2; focusViewCursor(); return; }
+    const idx = Math.max(0, Math.min(taskIdx, tasks.length-1));
+    viewCursor.taskIdx = idx;
+    targetNode = nodes[tasks[idx]];
+  }
+
+  // pulse the target node
+  gsap.to(targetNode.scale, {x:1.15,y:1.15,z:1.15,duration:.15,yoyo:true,repeat:1});
+
+  // update HUD label
+  const pct = Math.round(targetNode.userData.progress*100);
+  const levelLabel = level===1?"Master":level===2?"Hub":"Task";
+  document.getElementById("viewNodeLabel").innerText =
+    targetNode.userData.name + " — " + pct + "% · " + levelLabel;
+
+  // animate camera to look at this node from a close orbit
+  const tx = targetNode.position.x;
+  const ty = targetNode.position.y;
+  const tz = targetNode.position.z;
+  const dist = level===1?18:level===2?12:9;
+  gsap.to(viewCamTarget, {x:tx, y:ty, z:tz, duration:.6, ease:"power2.out"});
+  gsap.to(viewCamDist,   {v:dist,           duration:.6, ease:"power2.out"});
+
+  // panel / sidebar logic
+  if(level === 2){
+    // show add-task panel pre-set to this owner, close sidebar
+    document.getElementById("sidebar").classList.remove("open");
+    document.getElementById("panel").style.display = "block";
+    document.getElementById("teamSelect").value = targetNode.userData.owner;
+  } else if(level === 3){
+    // show sidebar for this task, hide add panel
+    document.getElementById("panel").style.display = "none";
+    openSidebarForNode(targetNode);
+  } else {
+    // level 1 — hide both
+    document.getElementById("panel").style.display = "none";
+    document.getElementById("sidebar").classList.remove("open");
+  }
+}
+
+const viewCamTarget = {x:0, y:2, z:0};
+const viewCamDist   = {v:42};
+let viewCamAngle = 0;
+
+window.addEventListener("keydown", e=>{
+  if(!viewMode) return;
+  const {level, hubId, taskIdx} = viewCursor;
+  const tasks = childrenOf[hubId];
+
+  if(e.key === "Escape"){ exitViewMode(); return; }
+
+  if(e.key === "ArrowRight"){
+    if(level===3 && tasks.length){
+      viewCursor.taskIdx = (taskIdx+1) % tasks.length;
+      focusViewCursor();
+    } else if(level===2){
+      // go down to first task
+      if(tasks.length){ viewCursor.level=3; viewCursor.taskIdx=0; focusViewCursor(); }
+    }
+    e.preventDefault();
+  }
+  if(e.key === "ArrowLeft"){
+    if(level===3 && tasks.length){
+      viewCursor.taskIdx = (taskIdx-1+tasks.length) % tasks.length;
+      focusViewCursor();
+    } else if(level===2){
+      if(tasks.length){ viewCursor.level=3; viewCursor.taskIdx=tasks.length-1; focusViewCursor(); }
+    }
+    e.preventDefault();
+  }
+  if(e.key === "ArrowUp"){
+    if(level===3){ viewCursor.level=2; focusViewCursor(); }
+    else if(level===2){ viewCursor.level=1; focusViewCursor(); }
+    e.preventDefault();
+  }
+  if(e.key === "ArrowDown"){
+    if(level===1){ viewCursor.level=2; focusViewCursor(); }
+    else if(level===2 && tasks.length){ viewCursor.level=3; viewCursor.taskIdx=0; focusViewCursor(); }
+    e.preventDefault();
+  }
+});
+
+document.getElementById("viewSelect").onchange = e=>{
+  const val = e.target.value;
+  if(val) enterViewMode(val);
+};
+
+document.getElementById("exitViewBtn").onclick = exitViewMode;
+
+/* ── ANIMATE ── */
+const clock = new THREE.Clock();
+function animate(){
+  requestAnimationFrame(animate);
+  const t = clock.getElapsedTime();
+
+  if(viewMode){
+    // slow orbit around the focused node
+    viewCamAngle += 0.008;
+    const dist = viewCamDist.v;
+    camera.position.x = viewCamTarget.x + Math.sin(viewCamAngle)*dist;
+    camera.position.z = viewCamTarget.z + Math.cos(viewCamAngle)*dist;
+    camera.position.y = viewCamTarget.y + dist*0.35;
+    camera.lookAt(viewCamTarget.x, viewCamTarget.y, viewCamTarget.z);
+  } else {
+    // normal orbit
+    const orbitR = 42;
+    camera.position.x = Math.sin(t*.1) * orbitR;
+    camera.position.z = Math.cos(t*.1) * orbitR;
+    camera.position.y = 18 + Math.sin(t*.05) * 4;
+    camera.lookAt(0, 2, 0);
+  }
+
+  // subtle bob
+  Object.values(nodes).forEach((node,i)=>{
+    node.position.y = node.userData.baseY + Math.sin(t*0.8+i)*0.04;
+    node.userData.ring.rotation.y = t*.35;
+  });
+  updateConnectors(t);
+  renderer.render(scene, camera);
+}
+animate();
+
+window.addEventListener("resize", ()=>{
+  camera.aspect = window.innerWidth/window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+</script>
+</body>
+</html>
